@@ -19,6 +19,8 @@ export interface GoalSchedulerState {
 	phase: "idle" | "ready" | "waiting" | "claimed" | "running" | "interrupted";
 	decision?: { kind: "ready"; purpose: GoalDispatchKind } | { kind: "wait" };
 	wait?: GoalWait;
+	/** Event-driven GOAL_WAIT; no deadline or polling and no new goal status. */
+	monitorWait?: { since: number };
 	dispatch?: { id: string; kind: GoalDispatchKind; claimedAt: number };
 	repairUsed: boolean;
 }
@@ -53,7 +55,8 @@ export function normalizeGoalScheduler(raw: unknown): GoalSchedulerState | undef
 	if (s.dispatch && (!text(s.dispatch.id) || !integer(s.dispatch.claimedAt) || !["ready", "check", "wake", "repair", "kickoff", "recovery"].includes(s.dispatch.kind))) return invalid();
 	if ((s.phase === "claimed" || s.phase === "running") && !s.dispatch) return invalid();
 	if (s.phase === "ready" && s.decision?.kind !== "ready") return invalid();
-	if (s.phase === "waiting" && (!s.wait || s.decision?.kind !== "wait")) return invalid();
+	if (s.monitorWait && (!integer(s.monitorWait.since) || s.wait || s.phase !== "waiting")) return invalid();
+	if (s.phase === "waiting" && ((!s.wait && !s.monitorWait) || s.decision?.kind !== "wait")) return invalid();
 	const normalized = structuredClone(s) as GoalSchedulerState;
 	if (normalized.decision && "nextAction" in normalized.decision) delete (normalized.decision as Record<string, unknown>).nextAction;
 	return normalized;
@@ -73,6 +76,7 @@ export function schedulerSummaryParts(s: GoalSchedulerState | undefined, limit?:
 	const runs = limit !== undefined && showRuns ? `Autonomous runs: ${s?.used ?? 0}/${limit}${limit === 0 ? " (automatic continuation disabled)" : ""}.` : "";
 	const lines: string[] = [];
 	if (s) {
+		if (s.monitorWait) lines.push("GOAL_WAIT: waiting for a user message or monitor notification. Automatic continuation is suspended; the goal and its budgets remain unchanged.");
 		if (s.wait) {
 			lines.push(`Waiting: ${s.wait.reason}; wait_id=${s.wait.id}; deadline=${new Date(s.wait.deadline).toISOString()}.`);
 			if (s.wait.nextCheckAt !== undefined) lines.push(`Next check: ${new Date(s.wait.nextCheckAt).toISOString()}; ${s.wait.remainingChecks} checks remaining.`);

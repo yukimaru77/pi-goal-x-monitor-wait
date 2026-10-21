@@ -49,6 +49,7 @@
     "image": "https://github.com/tmonk/pi-goal-x/raw/main/pi-goal-x.png"
   },
   "scripts": {
+    "test:monitor-wait": "node --experimental-strip-types --test tests/monitor-wait.test.ts && node scripts/monitor-pair-test.mjs",
     "check": "tsc --noEmit",
     "test": "node scripts/run-unit-tests.mjs",
     "test:serial": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",

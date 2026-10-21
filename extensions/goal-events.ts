@@ -459,6 +459,8 @@ export function registerGoalEvents(core: GoalCore): void {
 		// Rare transitional steering rides in the stable block; per-turn usage and
 		// scheduling counters stay in the volatile block so retention grows slowly.
 		let state = policy;
+		const monitorWaitFeedback = core.scheduler.consumeMonitorWaitFeedback();
+		if (monitorWaitFeedback) state += `\n\n[GOAL_WAIT NOT ENTERED]\n${monitorWaitFeedback}`;
 		// F5: [GOAL STALLED] steering note when the detector fired.
 		const stalledNote = core.checkStall(ctx);
 		if (stalledNote) state += stalledNote;
@@ -491,6 +493,7 @@ export function registerGoalEvents(core: GoalCore): void {
 	}
 
 	pi.on("agent_end", async (event, ctx) => {
+		core.scheduler.recordFinalMessage(event.messages);
 		const endedGoalId = core.runningGoalId;
 		core.runningGoalId = null;
 		continuationAfterSettleFor = null;

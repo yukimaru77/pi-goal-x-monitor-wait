@@ -19,6 +19,26 @@ The extension saves goal objectives, tasks, and progress across sessions. You ca
 
 ## Install
 
+### Local patch: monitor-backed `GOAL_WAIT`
+
+With an active auto-continue goal, the agent can include the literal
+`GOAL_WAIT` in its final assistant reply to suspend automatic continuation,
+but only while this session has a running monitor. Starting a monitor alone
+does not suspend a goal. User text, tool output, and thinking blocks do not
+request waiting.
+
+A user message or `monitor-event` notification releases the wait. The existing
+incoming turn handles the wakeup; no extra goal turn is scheduled. After an
+intermediate notification, the agent may explicitly wait again if a monitor
+is still running. Goal completion, manual pause, budget limits, and autonomous
+run counters retain their normal meaning.
+
+Waiting has no polling timer or deadline and survives reloading. Monitors
+themselves are session-local processes and do not restart on reload; a user
+message can always release the wait. This mode is separate from the existing
+strict-contract timed wait and requires the patched `pi-event-monitor` with
+the session-local `pi-monitor:query` notification protocol.
+
 ```bash
 pi install npm:pi-goal-x
 ```

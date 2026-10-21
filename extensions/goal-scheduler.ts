@@ -16,6 +16,12 @@ export class GoalScheduler {
 	private runGoalId: string | undefined;
 	private denied = false;
 	private unsubscribe: (() => void) | undefined;
+	private unsubscribeMonitor: (() => void) | undefined;
+	private wakeEpoch = 0;
+	private runWakeEpoch = 0;
+	private runMonitorSequence = 0;
+	private finalWaitRequested = false;
+	private monitorWaitFeedback = "";
 	private core: GoalCore;
 	constructor(core: GoalCore) { this.core = core; }
 
@@ -25,6 +31,7 @@ export class GoalScheduler {
 		return loadGoalSettings(ctx.cwd).strictExecutionContract === true || !!s.wait;
 	}
 	private implicitReady(s: GoalSchedulerState): void {
+		s.monitorWait = undefined;
 		s.phase = "ready"; s.dispatch = undefined; s.generation = randomUUID();
 		s.decision = { kind: "ready", purpose: "ready" };
 	}
@@ -75,7 +82,7 @@ export class GoalScheduler {
 		this.write(ctx, g => {
 			if (g.scheduler && g.scheduler.owner !== this.owner(ctx)) throw new Error("Scheduling ownership changed; no pause was applied.");
 			return { ...g, status: "paused", autoContinue: false, stopReason: "agent", pauseReason: reason,
-				scheduler: g.scheduler ? { ...g.scheduler, generation: randomUUID(), phase: "idle", decision: undefined, dispatch: undefined, wait: undefined } : undefined };
+				scheduler: g.scheduler ? { ...g.scheduler, generation: randomUUID(), phase: "idle", decision: undefined, dispatch: undefined, wait: undefined, monitorWait: undefined } : undefined };
 		});
 		this.core.clearActiveAccounting();
 		ctx.ui.notify(reason, "warning");
@@ -88,16 +95,46 @@ export class GoalScheduler {
 	attach(ctx: ExtensionContext): void {
 		this.ctx = ctx;
 		this.unsubscribe?.();
+		this.unsubscribeMonitor?.();
+		this.unsubscribeMonitor = this.core.pi.events?.on("pi-monitor:notification", () => {
+			this.wakeEpoch++;
+			if (this.ctx) this.wakeMonitorWait(this.ctx);
+		});
 		this.unsubscribe = this.core.pi.events?.on("pi-goal:wake", (event: unknown) => {
 			const raw = asRecord(event);
 			if (raw && this.ctx) this.signal(this.ctx, raw.goalId, raw.waitToken);
 		});
 	}
-	shutdown(): void { this.cancelTimer(); this.unsubscribe?.(); this.unsubscribe = undefined; this.ctx = undefined; }
+	shutdown(): void { this.cancelTimer(); this.unsubscribe?.(); this.unsubscribeMonitor?.(); this.unsubscribe = undefined; this.unsubscribeMonitor = undefined; this.ctx = undefined; }
+
+	private monitors(): { active: number; sequence: number } {
+		const query = { active: 0, sequence: 0 };
+		this.core.pi.events?.emit("pi-monitor:query", query);
+		return query;
+	}
+	/** Only the last assistant's successful final text can opt into monitor waiting. */
+	recordFinalMessage(messages: readonly unknown[]): void {
+		const last = asRecord(messages[messages.length - 1]);
+		const text = typeof last?.content === "string" ? last.content : Array.isArray(last?.content)
+			? last.content.filter((c: unknown) => asRecord(c)?.type === "text").map((c: unknown) => asRecord(c)?.text ?? "").join("") : "";
+		this.finalWaitRequested = last?.role === "assistant" && last.stopReason === "stop" && text.includes("GOAL_WAIT");
+	}
+	consumeMonitorWaitFeedback(): string {
+		const feedback = this.monitorWaitFeedback; this.monitorWaitFeedback = ""; return feedback;
+	}
+	private wakeMonitorWait(ctx: ExtensionContext): void {
+		const goal = this.core.state.goal;
+		if (!goal || goal.status !== "active" || goal.scheduler?.owner !== this.owner(ctx) || !goal.scheduler.monitorWait) return;
+		this.safe(ctx, () => {
+			this.cancelTimer(); this.core.runtime.clearContinuationState();
+			this.update(ctx, s => { s.monitorWait = undefined; s.phase = "idle"; s.decision = undefined; s.dispatch = undefined; s.generation = randomUUID(); });
+		});
+		// The producer's message supplies the wake-up run. Never schedule another.
+	}
 
 	restore(ctx: ExtensionContext): void {
 		this.attach(ctx);
-		this.inRun = false; this.declared = false; this.runGoalId = undefined;
+		this.inRun = false; this.declared = false; this.runGoalId = undefined; this.finalWaitRequested = false;
 		this.cancelTimer();
 		this.safe(ctx, () => {
 			this.core.reconcileFocusedGoalFromDisk(ctx);
@@ -148,6 +185,7 @@ export class GoalScheduler {
 			if (!this.core.state.goal || this.core.state.goal.status !== "active" || !this.core.state.goal.autoContinue || this.denied) throw new Error("Scheduling requires an active auto-continue goal in this session.");
 			invalidateGoalSettingsCache(); // an agent may have just configured the allowance
 			const goal = this.update(ctx, s => {
+				s.monitorWait = undefined;
 				if (!this.available(ctx, s)) throw new Error(this.allowanceReason(ctx));
 				if (input.kind === "ready") {
 					s.phase = "ready"; s.decision = { kind: "ready", purpose: "ready" }; s.wait = undefined;
@@ -185,6 +223,9 @@ export class GoalScheduler {
 		this.ctx = ctx;
 		if (this.inRun) { this.core.runningGoalId = this.core.state.goal?.id ?? null; return; }
 		this.inRun = true; this.declared = false; this.denied = false;
+		this.finalWaitRequested = false;
+		this.runWakeEpoch = this.wakeEpoch;
+		this.runMonitorSequence = this.monitors().sequence;
 		this.runGoalId = this.core.state.goal?.id;
 		this.cancelTimer(); this.core.runtime.clearContinuationTimer();
 		this.core.runningGoalId = this.core.state.goal?.id ?? null;
@@ -192,12 +233,29 @@ export class GoalScheduler {
 	turn(ctx: ExtensionContext): void {
 		if (!this.declared) return;
 		this.declared = false;
-		this.safe(ctx, () => this.update(ctx, s => { s.decision = undefined; s.phase = "idle"; s.dispatch = undefined; }));
+		this.safe(ctx, () => this.update(ctx, s => { s.decision = undefined; s.phase = "idle"; s.dispatch = undefined; s.monitorWait = undefined; }));
 	}
 	message(ctx: ExtensionContext, rawMessage: unknown): void {
 		const msg = asRecord(rawMessage);
 		if (!msg || !["user", "custom"].includes(String(msg.role))) return;
 		if (msg.customType === "pi-goal-audit-event") return;
+		if (msg.role === "user") {
+			this.wakeEpoch++;
+			this.monitorWaitFeedback = "";
+			this.wakeMonitorWait(ctx);
+			// message_start means the input is consumed, not merely queued.
+			this.runWakeEpoch = this.wakeEpoch;
+			this.finalWaitRequested = false;
+		}
+		if (msg.role === "custom" && msg.customType === "monitor-event") {
+			this.wakeMonitorWait(ctx);
+			this.runWakeEpoch = this.wakeEpoch;
+			const sequence = asRecord(msg.details)?.sequence;
+			if (typeof sequence === "number") this.runMonitorSequence = sequence;
+			this.finalWaitRequested = false;
+		}
+		// Unrelated extension chatter cannot release event-driven GOAL_WAIT.
+		if (msg.role === "custom" && this.core.state.goal?.scheduler?.monitorWait && msg.customType !== "pi-goal-event") return;
 		if (msg.customType === "pi-goal-event") {
 			const d = asRecord(msg.details);
 			if (d?.kind !== "checkpoint") return;
@@ -224,7 +282,7 @@ export class GoalScheduler {
 		const s = this.core.state.goal?.scheduler;
 		if (!s || s.owner !== this.owner(ctx)) return;
 		this.safe(ctx, () => this.update(ctx, state => {
-			state.generation = randomUUID(); state.phase = "idle"; state.decision = undefined; state.dispatch = undefined; state.wait = undefined;
+			state.generation = randomUUID(); state.phase = "idle"; state.decision = undefined; state.dispatch = undefined; state.wait = undefined; state.monitorWait = undefined;
 			state.repairUsed = false;
 		}));
 	}
@@ -235,6 +293,23 @@ export class GoalScheduler {
 		this.safe(ctx, () => {
 			const goal = this.core.state.goal;
 			if (!goal || goal.status !== "active" || !goal.autoContinue || !successful) return;
+			const state = this.state(ctx, goal);
+			if (state.monitorWait) return;
+			if (this.finalWaitRequested) {
+				if (budgetReached(goal)) { this.pause(ctx, "Goal token budget exhausted."); return; }
+				if (!this.available(ctx, state)) { this.pause(ctx, this.allowanceReason(ctx)); return; }
+				const monitors = this.monitors();
+				if (monitors.active > 0 && this.runWakeEpoch === this.wakeEpoch && this.runMonitorSequence === monitors.sequence && !ctx.hasPendingMessages()) {
+					this.cancelTimer(); this.core.runtime.clearContinuationState();
+					this.update(ctx, s => {
+						s.phase = "waiting"; s.decision = { kind: "wait" }; s.dispatch = undefined; s.wait = undefined;
+						s.monitorWait = { since: Date.now() }; s.generation = randomUUID();
+					});
+					this.core.clearActiveAccounting();
+					return;
+				}
+				if (monitors.active === 0) this.monitorWaitFeedback = "GOAL_WAIT was not entered because no monitor is running. Continue useful goal work, or start a relevant monitor before ending with GOAL_WAIT. Do not claim to be waiting without a wake source.";
+			}
 			if (this.declared && goal.scheduler?.decision) { this.schedule(ctx); return; }
 			const s = this.state(ctx, goal);
 			if (!this.strict(ctx, s)) {
@@ -253,6 +328,7 @@ export class GoalScheduler {
 		});
 	}
 	recover(ctx: ExtensionContext): void {
+		if (this.core.state.goal?.scheduler?.monitorWait) return;
 		this.safe(ctx, () => {
 			this.update(ctx, s => { s.phase = "ready"; s.dispatch = undefined; s.decision = { kind: "ready", purpose: "recovery" }; });
 			this.schedule(ctx);
@@ -276,6 +352,7 @@ export class GoalScheduler {
 			const g = this.core.state.goal;
 			if (!g || g.status !== "active" || !g.autoContinue || !g.scheduler) return;
 			let s = this.state(ctx, g);
+			if (s.monitorWait) { this.cancelTimer(); this.core.runtime.clearContinuationState(); this.core.clearActiveAccounting(); return; }
 			if (s.phase === "ready" && s.decision?.kind === "ready" && s.decision.purpose === "repair" && !this.strict(ctx, s)) {
 				s = this.update(ctx, state => this.implicitReady(state)).scheduler!;
 			}
@@ -307,6 +384,7 @@ export class GoalScheduler {
 			let result: Record<string, unknown> | null = null;
 			this.update(ctx, (s, g) => {
 				if (s.generation !== generation) throw new Error("Scheduling generation changed.");
+				if (s.monitorWait) throw new Error("Waiting for a user message or monitor notification.");
 				if (g.status !== "active" || !g.autoContinue || budgetReached(g) || !this.available(ctx, s)) throw new Error(this.allowanceReason(ctx));
 				if (s.wait && Date.now() >= s.wait.deadline) throw new Error("Wait deadline reached.");
 				if (s.phase === "ready" && s.decision?.kind === "ready" && s.decision.purpose === "repair" && !this.strict(ctx, s)) this.implicitReady(s);
