@@ -6,6 +6,9 @@ import { budgetReached } from "./goal-accounting.ts";
 import { loadGoalSettings, invalidateGoalSettingsCache } from "./goal-settings.ts";
 import { newGoalScheduler, schedulerSummary, type GoalContinuation, type GoalSchedulerState } from "./goal-scheduler-state.ts";
 
+/** Asked after the first GOAL_WAIT of a run; ending the next run with GOAL_WAIT again enters the wait. */
+export const GOAL_WAIT_CONFIRM = "GOAL_WAIT is not entered yet. Before waiting, check once more: is there really no independent work, deepening or investigation that can advance now, independent of what you are waiting for? If there is, do it now. If there is none, end this turn with GOAL_WAIT again; that enters the wait.";
+
 /** Scheduling intent is durable; timers only arrange an opportunity to claim it. */
 export class GoalScheduler {
 	private timer: ReturnType<typeof setTimeout> | undefined;
@@ -22,6 +25,8 @@ export class GoalScheduler {
 	private runMonitorSequence = 0;
 	private finalWaitRequested = false;
 	private monitorWaitFeedback = "";
+	/** The previous run ended with GOAL_WAIT and was asked to confirm; a second one in a row enters the wait. */
+	private waitConfirmPending = false;
 	private core: GoalCore;
 	constructor(core: GoalCore) { this.core = core; }
 
@@ -134,7 +139,7 @@ export class GoalScheduler {
 
 	restore(ctx: ExtensionContext): void {
 		this.attach(ctx);
-		this.inRun = false; this.declared = false; this.runGoalId = undefined; this.finalWaitRequested = false;
+		this.inRun = false; this.declared = false; this.runGoalId = undefined; this.finalWaitRequested = false; this.waitConfirmPending = false;
 		this.cancelTimer();
 		this.safe(ctx, () => {
 			this.core.reconcileFocusedGoalFromDisk(ctx);
@@ -242,6 +247,8 @@ export class GoalScheduler {
 		if (msg.role === "user") {
 			this.wakeEpoch++;
 			this.monitorWaitFeedback = "";
+			// New user input needs a fresh confirmation before waiting.
+			this.waitConfirmPending = false;
 			this.wakeMonitorWait(ctx);
 			// message_start means the input is consumed, not merely queued.
 			this.runWakeEpoch = this.wakeEpoch;
@@ -295,11 +302,18 @@ export class GoalScheduler {
 			if (!goal || goal.status !== "active" || !goal.autoContinue || !successful) return;
 			const state = this.state(ctx, goal);
 			if (state.monitorWait) return;
+			if (!this.finalWaitRequested) this.waitConfirmPending = false;
 			if (this.finalWaitRequested) {
 				if (budgetReached(goal)) { this.pause(ctx, "Goal token budget exhausted."); return; }
 				if (!this.available(ctx, state)) { this.pause(ctx, this.allowanceReason(ctx)); return; }
 				const monitors = this.monitors();
-				if (monitors.active > 0 && this.runWakeEpoch === this.wakeEpoch && this.runMonitorSequence === monitors.sequence && !ctx.hasPendingMessages()) {
+				const waitable = monitors.active > 0 && this.runWakeEpoch === this.wakeEpoch && this.runMonitorSequence === monitors.sequence && !ctx.hasPendingMessages();
+				if (waitable && !this.waitConfirmPending) {
+					// The first GOAL_WAIT only asks for confirmation; the continuation below carries the question.
+					this.waitConfirmPending = true;
+					this.monitorWaitFeedback = GOAL_WAIT_CONFIRM;
+				} else if (waitable) {
+					this.waitConfirmPending = false;
 					this.cancelTimer(); this.core.runtime.clearContinuationState();
 					this.update(ctx, s => {
 						s.phase = "waiting"; s.decision = { kind: "wait" }; s.dispatch = undefined; s.wait = undefined;
@@ -308,7 +322,10 @@ export class GoalScheduler {
 					this.core.clearActiveAccounting();
 					return;
 				}
-				if (monitors.active === 0) this.monitorWaitFeedback = "GOAL_WAIT was not entered because no monitor is running. Continue useful goal work, or start a relevant monitor before ending with GOAL_WAIT. Do not claim to be waiting without a wake source.";
+				if (monitors.active === 0) {
+					this.waitConfirmPending = false;
+					this.monitorWaitFeedback = "GOAL_WAIT was not entered because no monitor is running (neither a monitor nor a still-running exec_command session). Continue useful goal work, or start a relevant monitor before ending with GOAL_WAIT. Do not claim to be waiting without a wake source.";
+				}
 			}
 			if (this.declared && goal.scheduler?.decision) { this.schedule(ctx); return; }
 			const s = this.state(ctx, goal);

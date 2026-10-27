@@ -48,6 +48,8 @@ function harness(t: any) {
   get sequence() { return sequence; }, setActive(n: number) { active = n; }, setPending(p: boolean) { pending = p; },
   settings(s: unknown) { writeFileSync(join(cwd, "settings.json"), JSON.stringify(s)); invalidateGoalSettingsCache(); },
   start() { scheduler.begin(ctx); scheduler.message(ctx, { role: "user", content: "Watch" }); scheduler.turn(ctx); },
+  /** A run opened by the goal's own continuation (the confirmation question after a first GOAL_WAIT). */
+  cont() { scheduler.begin(ctx); scheduler.message(ctx, { role: "custom", customType: "pi-goal-event", content: "continue" }); scheduler.turn(ctx); },
   end(messages: unknown[] = [final()]) { scheduler.recordFinalMessage(messages); scheduler.settled(ctx); },
   notify() { sequence++; events.emit("pi-monitor:notification", { id: "monitor-1", sequence }); },
   consumeNotification() { scheduler.message(ctx, { role: "custom", customType: "monitor-event", details: { sequence } }); },
@@ -55,15 +57,19 @@ function harness(t: any) {
  };
 }
 
-test("active goal + running monitor + final GOAL_WAIT persist a wait without resetting counters", t => {
+test("active goal + running monitor + GOAL_WAIT confirmed by the next run persist a wait without resetting counters", t => {
  const h = harness(t); h.start(); h.end();
+ // The first GOAL_WAIT only asks for confirmation through the continuation.
+ assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.queued, 1);
+ assert.match(h.scheduler.consumeMonitorWaitFeedback(), /not entered yet[\s\S]*end this turn with GOAL_WAIT again/);
+ h.cont(); h.end();
  assert.equal(h.state.goal.status, "active"); assert.equal(h.state.goal.autoContinue, true);
  assert.equal(h.state.goal.scheduler.phase, "waiting"); assert.ok(h.state.goal.scheduler.monitorWait);
  assert.equal(h.state.goal.scheduler.used, 3); assert.equal(h.state.goal.usage.tokensUsed, 17); assert.equal(h.state.goal.tokenBudget, 200);
- assert.equal(h.queued, 0); assert.equal(h.accountingCleared, 1); assert.ok(h.scheduler.isWaiting());
+ assert.equal(h.queued, 1); assert.equal(h.accountingCleared, 1); assert.ok(h.scheduler.isWaiting());
  assert.match(schedulerSummary(h.state.goal.scheduler), /GOAL_WAIT/);
  h.setActive(0); h.reload(); h.scheduler.schedule(h.ctx);
- assert.ok(h.scheduler.isWaiting()); assert.equal(h.queued, 0); assert.equal(h.state.goal.scheduler.used, 3);
+ assert.ok(h.scheduler.isWaiting()); assert.equal(h.queued, 1); assert.equal(h.state.goal.scheduler.used, 3);
 });
 
 test("monitor alone continues; marker without a monitor continues with feedback", t => {
@@ -84,28 +90,30 @@ test("only the final assistant stop text counts, not tools, thinking, user text,
 });
 
 test("monitor notification releases the wait without sending a duplicate continuation", t => {
- const h = harness(t); h.start(); h.end(); h.notify();
- assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.state.goal.scheduler.phase, "idle"); assert.equal(h.queued, 0);
+ const h = harness(t); h.start(); h.end(); h.cont(); h.end(); h.notify();
+ assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.state.goal.scheduler.phase, "idle"); assert.equal(h.queued, 1);
  assert.equal(h.state.goal.scheduler.used, 3); assert.equal(h.state.goal.status, "active");
- h.scheduler.begin(h.ctx); h.consumeNotification(); h.end(); assert.ok(h.scheduler.isWaiting());
+ // Each new wait is confirmed again.
+ h.scheduler.begin(h.ctx); h.consumeNotification(); h.end(); assert.ok(!h.scheduler.isWaiting());
+ h.cont(); h.end(); assert.ok(h.scheduler.isWaiting());
 });
 
 test("user input wakes a persisted wait, while unrelated extension chatter cannot", t => {
- const h = harness(t); h.start(); h.end(); h.reload();
+ const h = harness(t); h.start(); h.end(); h.cont(); h.end(); h.reload();
  h.scheduler.message(h.ctx, { role: "custom", customType: "other-extension", content: "hello" }); assert.ok(h.scheduler.isWaiting());
  h.scheduler.message(h.ctx, { role: "user", content: "What happened?" });
- assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.queued, 0); assert.equal(h.state.goal.scheduler.used, 3);
+ assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.queued, 1); assert.equal(h.state.goal.scheduler.used, 3);
 });
 
 test("a delivered monitor message also wakes a persisted wait without its original bus event", t => {
- const h = harness(t); h.start(); h.end(); h.reload(); h.consumeNotification();
- assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.queued, 0);
+ const h = harness(t); h.start(); h.end(); h.cont(); h.end(); h.reload(); h.consumeNotification();
+ assert.equal(h.state.goal.scheduler.monitorWait, undefined); assert.equal(h.queued, 1);
 });
 
 test("notification after final output cannot be lost to a new wait; consumed notification permits a later wait", t => {
  const h = harness(t); h.start(); h.scheduler.recordFinalMessage([final()]); h.notify(); h.scheduler.settled(h.ctx);
  assert.equal(h.state.goal.scheduler.monitorWait, undefined);
- h.start(); h.notify(); h.consumeNotification(); h.end(); assert.ok(h.scheduler.isWaiting());
+ h.start(); h.notify(); h.consumeNotification(); h.end(); h.cont(); h.end(); assert.ok(h.scheduler.isWaiting());
 });
 
 test("pending user/monitor messages prevent entering wait", t => {
@@ -134,4 +142,19 @@ test("normalizer accepts persisted monitor waits and rejects conflicting deadlin
  assert.deepEqual(normalizeGoalScheduler(JSON.parse(JSON.stringify(s))), s);
  assert.equal(normalizeGoalScheduler({ ...s, monitorWait: { since: "bad" } })?.phase, "interrupted");
  assert.equal(normalizeGoalScheduler({ ...s, phase: "idle" })?.phase, "interrupted");
+});
+
+test("the confirmation counts only consecutive runs: work inside a run is fine, a run without GOAL_WAIT or new user input resets it", t => {
+ const h = harness(t);
+ // The confirming run may call tools before its final GOAL_WAIT; only its final message is judged.
+ h.start(); h.end(); h.cont();
+ h.end([{ role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Checking files" }] }, { role: "toolResult", content: [{ type: "text", text: "ok" }] }, final()]);
+ assert.ok(h.scheduler.isWaiting());
+ h.notify();
+ // A run that ends without GOAL_WAIT drops the pending confirmation.
+ h.start(); h.end(); h.cont(); h.end([final("Found more to do")]); h.cont(); h.end();
+ assert.ok(!h.scheduler.isWaiting());
+ // New user input between the two also needs a fresh confirmation.
+ h.start(); h.end(); assert.ok(!h.scheduler.isWaiting());
+ h.cont(); h.end(); assert.ok(h.scheduler.isWaiting());
 });
