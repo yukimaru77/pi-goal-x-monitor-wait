@@ -324,7 +324,7 @@ export class GoalScheduler {
 				}
 				if (monitors.active === 0) {
 					this.waitConfirmPending = false;
-					this.monitorWaitFeedback = "GOAL_WAIT was not entered because no monitor is running (neither a monitor nor a still-running exec_command session). Continue useful goal work, or start a relevant monitor before ending with GOAL_WAIT. Do not claim to be waiting without a wake source.";
+					this.monitorWaitFeedback = "GOAL_WAIT was not entered because no exec_command session is running in the background (see exec_list). Continue useful goal work, or start the command whose result you need with exec_command before ending with GOAL_WAIT. Do not claim to be waiting without a wake source.";
 				}
 			}
 			if (this.declared && goal.scheduler?.decision) { this.schedule(ctx); return; }

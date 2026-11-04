@@ -75,7 +75,7 @@ test("active goal + running monitor + GOAL_WAIT confirmed by the next run persis
 test("monitor alone continues; marker without a monitor continues with feedback", t => {
  const h = harness(t); h.start(); h.end([final("More work remains")]); assert.equal(h.queued, 1);
  h.setActive(0); h.start(); h.end(); assert.equal(h.queued, 2); assert.equal(h.state.goal.scheduler.monitorWait, undefined);
- assert.match(h.scheduler.consumeMonitorWaitFeedback(), /no monitor is running/); assert.equal(h.scheduler.consumeMonitorWaitFeedback(), "");
+ assert.match(h.scheduler.consumeMonitorWaitFeedback(), /no exec_command session is running in the background/); assert.equal(h.scheduler.consumeMonitorWaitFeedback(), "");
 });
 
 test("only the final assistant stop text counts, not tools, thinking, user text, old or failed messages", t => {

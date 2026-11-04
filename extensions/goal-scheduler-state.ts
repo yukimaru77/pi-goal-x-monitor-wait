@@ -76,7 +76,7 @@ export function schedulerSummaryParts(s: GoalSchedulerState | undefined, limit?:
 	const runs = limit !== undefined && showRuns ? `Autonomous runs: ${s?.used ?? 0}/${limit}${limit === 0 ? " (automatic continuation disabled)" : ""}.` : "";
 	const lines: string[] = [];
 	if (s) {
-		if (s.monitorWait) lines.push("GOAL_WAIT: waiting for a user message or monitor notification. Automatic continuation is suspended; the goal and its budgets remain unchanged.");
+		if (s.monitorWait) lines.push("GOAL_WAIT: waiting for a user message or a background exec_command notification. Automatic continuation is suspended; the goal and its budgets remain unchanged.");
 		if (s.wait) {
 			lines.push(`Waiting: ${s.wait.reason}; wait_id=${s.wait.id}; deadline=${new Date(s.wait.deadline).toISOString()}.`);
 			if (s.wait.nextCheckAt !== undefined) lines.push(`Next check: ${new Date(s.wait.nextCheckAt).toISOString()}; ${s.wait.remainingChecks} checks remaining.`);
