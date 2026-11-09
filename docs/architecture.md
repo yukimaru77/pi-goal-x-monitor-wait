@@ -32,9 +32,9 @@ handlers from their dedicated modules:
 | `goal-policy.ts` | Lifecycle policy and validation (completion/blocked/resume/task gates), task-tree helpers, compaction policy, result reports |
 | `goal-auditor.ts` | Independent pi auditor agent prompt/config/decision parsing and completion audit execution |
 | `goal-ledger.ts` | Single-file goal ledger append/read/reconstruction (18 event types incl. `task_reopened`) |
-| `goal-draft.ts` | Drafting prompt/confirmation text helpers (goalDraftingPrompt, buildDraftConfirmationText, renderConfirmationTasks, GoalDraftingFocus) |
+| `goal-draft.ts` | Drafting prompt/summary text helpers (goalDraftingPrompt, buildProposalSummary, renderProposalTasks, GoalDraftingFocus) |
 | `goal-drafting.ts` | Guided drafting orchestration: durable `pi-goal-draft` session entries (survive compaction/tree navigation), resume/replace/cancel protection, transient drafting profile, `goal_question`/`goal_questionnaire`/`propose_goal_draft` tools, per-draft auditor selection |
-| `goal-questionnaire.ts` | Structured question/answer UI (`runGoalQuestionnaire`, `showProposalDialog`) used by the drafting tools and confirmations |
+| `goal-questionnaire.ts` | Structured question/answer UI (`runGoalQuestionnaire`) used by the drafting question tools |
 | `goal-tool-names.ts` | The five published tool-name constants, lifecycle-dependent profiles, work/progress classification, post-stop allowlist |
 | `goal-detail.ts` | Lossless objective/task/history paging with content-bound cursors |
 | `goal-ledger-index.ts` | Incremental per-goal activity, audit, lifecycle, and Oracle projections |
@@ -202,11 +202,11 @@ The extension registers five normal-execution tools and three drafting-only tool
 | `create_goal` | Create and focus a new goal after an explicit user request (objective 1–4000 chars, optional `mode` regular/sisyphus and `token_budget`). |
 | `get_goal` | Compact summary by default; lossless objective/tasks/history pages (up to 4,000 content characters), optional task selection, legacy verbose/history forms. |
 | `update_goal` | Run outcomes: `complete` (audited from actual evidence; optional `completion_summary` is an untrusted claim), `blocked` (after three consecutive identical blockers), or `paused` (immediate agent pause with required `reason`). |
-| `set_goal_tasks` | Create or structurally replace the task tree (flat parent-linked input, confirmation dialog, id-stable merge). |
+| `set_goal_tasks` | Create or structurally replace the task tree (flat parent-linked input, applied immediately, id-stable merge). |
 | `update_goal_task` | Update one task or an ordered atomic batch: start, complete (evidence for contracted tasks), skipped (reason), pending (reopens skipped). |
 | `goal_question` | Drafting-only structured clarification question. |
 | `goal_questionnaire` | Drafting-only multi-question clarification UI. |
-| `propose_goal_draft` | Drafting-only objective/task proposal with Confirm or Continue Chatting. |
+| `propose_goal_draft` | Drafting-only objective/task proposal; creates or revises the goal immediately. |
 
 Outside drafting, creation and inspection are always advertised. Outcomes are
 advertised for active/paused/budget-limited goals; task planning for active or

@@ -42,6 +42,16 @@ strict-contract timed wait and relies on the `pi-monitor:query` /
 `pi-monitor:notification` events answered by the patched pi-codex-tools
 (pi-event-monitor is no longer used).
 
+### Local patch: proposals apply without a confirmation dialog
+
+`propose_goal_draft` and `set_goal_tasks` no longer open a Confirm dialog. A
+guided `/goal`, `/sisyphus`, or `/goal-tweak` draft still clarifies the request
+in conversation, but the proposal creates or revises the goal and its task list
+the moment the agent calls the tool, and the proposal summary is written to the
+transcript. Use `/goal-cancel` while drafting to discard a draft, and
+`/goal-settings` or `Ctrl+Shift+A` to choose the auditor; the per-proposal
+auditor toggle and `PI_GOAL_AUTO_CONFIRM` are gone.
+
 ```bash
 pi install npm:pi-goal-x
 ```
@@ -52,7 +62,7 @@ pi install npm:pi-goal-x
 /goal Add CSV export to the reports page, with documentation and tests.
 ```
 
-The agent discusses the goal with you, asks focused questions where needed, and proposes an objective, task plan, and completion requirements. You review the proposal and choose whether to use the completion auditor. Once you confirm, the agent starts working and continues automatically while the goal is active.
+The agent discusses the goal with you, asks focused questions where needed, and then creates the goal with its objective, task plan, and completion requirements. The proposal summary appears in the transcript, and the agent starts working and continues automatically while the goal is active.
 
 You can specify completion requirements, such as passing the test suite or producing a report with every required section. The agent tracks tasks and subtasks, records evidence, and works toward those requirements. If it gets blocked and needs your input, you can resolve the issue and resume.
 
@@ -115,8 +125,8 @@ A project can have several open goals, with one focused goal per session. Switch
 
 | Command | What it does |
 | --- | --- |
-| `/goal [idea]` | Discuss, plan, and confirm a regular goal. |
-| `/sisyphus [idea]` | Discuss, plan, and confirm an ordered goal. |
+| `/goal [idea]` | Discuss, plan, and create a regular goal. |
+| `/sisyphus [idea]` | Discuss, plan, and create an ordered goal. |
 | `/goal-direct <objective>` | Create and start a regular goal immediately. |
 | `/sisyphus-direct <objective>` | Create and start an ordered goal immediately. |
 | `/goal-list` | List open goals. |
@@ -127,7 +137,7 @@ A project can have several open goals, with one focused goal per session. Switch
 | `/goal-pause` | Pause work on the focused goal. |
 | `/goal-resume` | Resume a paused or blocked goal. |
 | `/goal-clear` | Archive the focused goal after confirmation. |
-| `/goal-cancel` | Cancel an unconfirmed draft. |
+| `/goal-cancel` | Cancel a draft that is still being discussed. |
 | `/goal-settings` | Configure goal behaviour and the auditor. |
 
 For troubleshooting, use `/goal-status verbose` for more detail, `/goal-status health` or `/goal-recovery` to check for problems, and `/goal-refresh` to reload saved goals and settings after external changes. `/goal-recovery repair` offers repairs after confirmation.

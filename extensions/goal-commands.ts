@@ -715,13 +715,13 @@ export function registerGoalCommands(core: GoalCore): void {
 
 	// /goal and /sisyphus are the guided default. -direct commands are the explicit bypass.
 	pi.registerCommand("goal", {
-		description: "Draft a regular goal with clarification, task planning, and confirmation.",
+		description: "Draft a regular goal with clarification and task planning, then create it.",
 		handler: async (rawArgs, ctx) => {
 			await startGoalDrafting(core, ctx, "goal", rawArgs);
 		},
 	});
 	pi.registerCommand("sisyphus", {
-		description: "Draft a Sisyphus goal with clarification, task planning, and confirmation.",
+		description: "Draft a Sisyphus goal with clarification and task planning, then create it.",
 		handler: async (rawArgs, ctx) => {
 			await startGoalDrafting(core, ctx, "sisyphus", rawArgs);
 		},
@@ -791,7 +791,7 @@ export function registerGoalCommands(core: GoalCore): void {
 		},
 	});
 	pi.registerCommand("goal-tweak", {
-		description: "Revise the current goal or its token budget with confirmation.",
+		description: "Revise the current goal or its token budget through a guided draft.",
 		handler: async (rawArgs, ctx) => {
 			await runGoalTweak(rawArgs, ctx);
 		},
