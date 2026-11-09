@@ -16,7 +16,6 @@ import { goalDetails, renderGoalResult } from "./goal-format.ts";
 import { statusLabel, truncateText } from "./goal-core.ts";
 import { loadGoalSettings } from "./goal-settings.ts";
 import { buildTaskSummary, checkSubtasksComplete, findSubtaskDepthViolation, findTaskInTree, skipAllSubtasks } from "./goal-policy.ts";
-import { showTaskConfirmation, type TaskConfirmationResult } from "./goal-task-confirmation.ts";
 import {
 	SET_GOAL_TASKS_TOOL_NAME,
 	UPDATE_GOAL_TASK_TOOL_NAME,
@@ -255,8 +254,8 @@ export function registerTaskTools(core: import("./goal-state.ts").GoalCore): voi
 pi.registerTool(defineTool({
 	name: SET_GOAL_TASKS_TOOL_NAME,
 	label: "Set Goal Tasks",
-	description: "Set or restructure the task tree with user confirmation. Matching IDs retain progress; removed IDs are deleted. Confirmation stops the turn; continuation follows.",
-	promptSnippet: "Set the goal task tree with confirmation.",
+	description: "Set or restructure the task tree. Matching IDs retain progress; removed IDs are deleted. The call is applied immediately and stops the turn; continuation follows.",
+	promptSnippet: "Set the goal task tree.",
 	promptGuidelines: ["Use tasks only for useful milestones. Restructure an existing tree only when the user asks or requirements structurally change. Input is a flat parent-linked tree, at most 50 tasks, within configured depth. lightweight_subtasks is valid only on parents."],
 	parameters: Type.Object({
 		tasks: Type.Array(Type.Object({
@@ -301,49 +300,13 @@ pi.registerTool(defineTool({
 		const blockCompletion = params.block_completion === true;
 		const now = nowIso();
 
-		// Render the proposed STRUCTURAL tree for the confirmation dialog.
-		// Progress merge happens inside GoalService.apply against the
-		// disk-refreshed clone.
-		function renderTaskLines(tasks: GoalTask[], indent = 0): string[] {
-			const prefix = "  ".repeat(indent);
-			const lines: string[] = [];
-			for (const t of tasks) {
-				const marker = t.status === "complete" ? "[x]" : t.status === "skipped" ? "[~]" : "[ ]";
-				const lw = t.lightweightSubtasks ? " (lightweight)" : "";
-				lines.push(`${prefix}${marker} ${t.id}: ${t.title}${lw}`);
-				if (t.subtasks && t.subtasks.length > 0) {
-					lines.push(...renderTaskLines(t.subtasks, indent + 1));
-				}
-			}
-			return lines;
-		}
-		const taskLines = renderTaskLines(converted.tasks);
 		const gateLabel = blockCompletion ? " (blockCompletion enabled)" : "";
-		const proposalText = [`Proposed task list${gateLabel}:`, "", ...taskLines].join("\n");
 		const taskListFocus = core.focusedOperationToken(core.state.goal.id);
-		// Task-only confirmation: the complete result is the user's decision.
-		// No auditor toggle and no goal-state mutation happen here.
-		core.enterGoalModal();
-		let dialogResult: TaskConfirmationResult;
-		try {
-			dialogResult = await showTaskConfirmation(ctx, proposalText);
-		} finally {
-			core.exitGoalModal();
-		}
-		if (!core.isFocusedOperationCurrent(taskListFocus)) {
-			return core.focusedOperationCancelledResult("Task list proposal", taskListFocus);
-		}
-		if (dialogResult.decision !== "confirm") {
-			return {
-				content: [{ type: "text", text: "Task list kept unchanged." }],
-				details: goalDetails(core.state.goal),
-			};
-		}
 		const applyResult = core.goalService.apply(ctx, {
 			reconcile: false,
 			focusToken: taskListFocus,
 			refreshFromDisk: true,
-			// Merge the confirmed structural input against the disk-refreshed
+			// Merge the structural input against the disk-refreshed
 			// clone so a concurrent external edit is preserved unless the
 			// requested operation changes the same task.
 			mutate: (g) => {
@@ -375,7 +338,7 @@ pi.registerTool(defineTool({
 		core.updateUI(ctx);
 		const confirmedCount = countTasks(core.state.goal.taskList?.tasks);
 		return {
-			content: [{ type: "text", text: `Task list set and confirmed. ${confirmedCount} task${confirmedCount === 1 ? "" : "s"}.${gateLabel}` }],
+			content: [{ type: "text", text: `Task list set. ${confirmedCount} task${confirmedCount === 1 ? "" : "s"}.${gateLabel}` }],
 			details: goalDetails(core.state.goal),
 			terminate: true,
 		};

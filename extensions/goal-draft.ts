@@ -1,6 +1,5 @@
 import type { GoalTask, GoalTaskList } from "./goal-record.ts";
 import { promptSafeObjective } from "./goal-contract.ts";
-import { renderConfirmationTasks } from "./goal-task-confirmation.ts";
 
 export type GoalDraftingFocus = "goal" | "sisyphus";
 
@@ -26,70 +25,19 @@ export type ToolGateDecision =
 	| { block: false }
 	| { block: true; reason: string };
 
-// ── Shared formatting helpers ──────────────────────────────────────────────
-function formatModeLabel(sisyphus: boolean): string {
-	return sisyphus ? "Sisyphus (prompt/criteria style)" : "Normal goal";
-}
-
-function formatPrefixedLines(content: string): string[] {
+/** Render a task tree as checklist lines for proposal displays. */
+export function renderProposalTasks(tasks: readonly GoalTask[], indent: number): string[] {
+	const prefix = "  ".repeat(indent);
 	const lines: string[] = [];
-	for (const rawLine of content.split("\n")) {
-		const trimmed = rawLine.trim();
-		if (!trimmed) continue;
-		if (trimmed.startsWith("│")) {
-			lines.push(rawLine);
-		} else {
-			lines.push(`│   ${rawLine}`);
+	for (const t of tasks) {
+		const lw = t.lightweightSubtasks ? " (lightweight)" : "";
+		const contract = t.verificationContract ? ` contract: ${t.verificationContract}` : "";
+		lines.push(`${prefix}[ ] ${t.id}: ${t.title}${lw}${contract}`);
+		if (t.subtasks && t.subtasks.length > 0) {
+			lines.push(...renderProposalTasks(t.subtasks, indent + 1));
 		}
 	}
 	return lines;
-}
-
-function formatSection(title: string, content: string): string[] {
-	const body = formatPrefixedLines(content);
-	return ["", `─── ${title} ───`, "", ...body];
-}
-
-export function buildDraftConfirmationText(args: {
-	focus: GoalDraftingFocus;
-	originalTopic: string;
-	objective: string;
-	autoContinue: boolean;
-}): string {
-	const lines: string[] = [];
-	lines.push("● Goal draft ready for confirmation.");
-	lines.push("");
-	lines.push("─── Draft Details ───");
-	lines.push(`│   Mode: ${formatModeLabel(args.focus === "sisyphus")}`);
-	lines.push(`│   Auto-continue: ${args.autoContinue ? "yes" : "no"}`);
-	lines.push(...formatSection("Original Topic", args.originalTopic.trim()));
-	lines.push(...formatSection("Proposed Goal", args.objective));
-	return lines.join("\n");
-}
-
-export function buildTweakConfirmationText(args: {
-	currentObjective: string;
-	newObjective: string;
-	changeSummary: string;
-	sisyphus: boolean;
-	tasks?: GoalTask[];
-}): string {
-	const lines: string[] = [];
-	lines.push("● Goal tweak ready for confirmation.");
-	lines.push("");
-	lines.push("─── Draft Details ───");
-	lines.push(`│   Mode: ${formatModeLabel(args.sisyphus)}`);
-	lines.push(...formatSection("Change", args.changeSummary));
-	lines.push(...formatSection("Current Objective", args.currentObjective));
-	lines.push(...formatSection("Proposed New Objective", args.newObjective));
-	if (args.tasks && args.tasks.length > 0) {
-		const taskLines = renderConfirmationTasks(args.tasks, 0);
-		lines.push("");
-		lines.push(`┌─ TASKS ─────────────────────────────────────┐`);
-		for (const tl of taskLines) lines.push(tl);
-		lines.push(`└──────────────────────────────────────────────┘`);
-	}
-	return lines.join("\n");
 }
 
 export function evaluateDraftingToolGate(args: {
@@ -101,8 +49,8 @@ export function evaluateDraftingToolGate(args: {
 	tweakApplyToolName?: string;
 	getGoalToolName?: string;
 }): ToolGateDecision {
-	// Goal confirmation is prompt-guided, not runtime-enforced. The agent should
-	// avoid substantive work before confirmation, but minimal reconnaissance is allowed.
+	// Staying in drafting is prompt-guided, not runtime-enforced. The agent should
+	// avoid substantive work before the goal is created, but minimal reconnaissance is allowed.
 	void args;
 	return { block: false };
 }
@@ -135,21 +83,21 @@ export function validateGoalDraftProposal(input: DraftProposalInput): DraftPropo
 export function goalDraftingPrompt(topic: string, focus: GoalDraftingFocus): string {
 	const safeTopic = promptSafeObjective(topic.trim() || "(no topic provided — ask the user what they want to accomplish)");
 	const header = focus === "sisyphus"
-		? "[GOAL CONFIRMATION focus=sisyphus]\nThe user invoked Sisyphus intent discussion (/sisyphus). Help turn their request into a confirmed goal contract. Do NOT start substantive work yet."
-		: "[GOAL CONFIRMATION focus=goal]\nThe user invoked guided goal drafting (/goal). Help turn their request into a confirmed goal contract. Do NOT start substantive work yet.";
+		? "[GOAL CONFIRMATION focus=sisyphus]\nThe user invoked Sisyphus intent discussion (/sisyphus). Help turn their request into a goal contract they agree with. Do NOT start substantive work yet."
+		: "[GOAL CONFIRMATION focus=goal]\nThe user invoked guided goal drafting (/goal). Help turn their request into a goal contract they agree with. Do NOT start substantive work yet.";
 
 	const commonProtocol = [
-		"Confirmation protocol:",
+		"Drafting protocol:",
 		"- Treat this as a lightweight conversation with the user, not a separate long-running runtime phase.",
 		"- If the topic is vague, ask one focused question with a recommended default. Use goal_question or goal_questionnaire when a structured answer would help, but plain conversation is acceptable.",
-		"- Targeted read-only research is allowed when it helps define a better goal contract; do not start implementation before confirmation.",
+		"- Targeted read-only research is allowed when it helps define a better goal contract; do not start implementation before the goal is created.",
 		"- If the topic is already concrete, you may proceed directly to propose_goal_draft.",
 		"- The goal contract should make the objective, success criteria, boundaries, constraints, and blocker rule explicit.",
-		"- Keep grilling assumptions until the objective, success criteria, boundaries, constraints, and blocker rule are clear enough to confirm.",
-		"- If the objective naturally decomposes into trackable milestones, you MUST include the task list in the `tasks` parameter of `propose_goal_draft` so the user can accept both goal and tasks in a single confirmation dialog. Do NOT propose the goal without tasks and then call `propose_task_list` separately.",
+		"- Keep grilling assumptions until the objective, success criteria, boundaries, constraints, and blocker rule are clear enough to create the goal.",
+		"- If the objective naturally decomposes into trackable milestones, you MUST include the task list in the `tasks` parameter of `propose_goal_draft` so the goal is created together with its tasks. Do NOT propose the goal without tasks and then call `propose_task_list` separately.",
 		"- For simple single-step goals, no task list is required. The `tasks` parameter can be omitted.",
 		"- After goal creation, `propose_task_list` is still available for user-requested task additions or structural changes.",
-		"- propose_goal_draft opens the user's Confirm / Continue Chatting dialog. Confirm creates and focuses the goal; Continue Chatting means keep refining through normal proposal cycles.",
+		"- propose_goal_draft creates and focuses the goal (or applies the tweak) immediately; there is no confirmation dialog, so propose only once the user has agreed to the contract in conversation.",
 		"- Call propose_goal_draft with the complete structured proposal. The tool call renderer is the scrollable, complete human presentation of the objective and task tree — do NOT duplicate the full proposal in a preceding prose message. A brief orientation sentence is fine.",
 		"- create_goal is not a shortcut. Direct create_goal calls are rejected so the user keeps explicit say in goal creation.",
 	];
@@ -209,9 +157,8 @@ export interface ProposalSummaryArgs {
 /**
  * Durable proposal summary written to the terminal transcript (plan §14):
  * proposed objective, proposed plan (numbered top-level tasks), verification,
- * automatic-continuation state, and auditor state. Produced for every proposal
- * outcome (confirm / continue refining / cancel) so the summary is always part
- * of the conversation, not only the confirmation dialog.
+ * automatic-continuation state, and auditor state. Produced when the proposal
+ * is applied so the user can review what was created or revised.
  */
 export function buildProposalSummary(args: ProposalSummaryArgs): string {
 	const lines: string[] = ["Proposed objective:", args.objective.trim()];

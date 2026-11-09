@@ -3,14 +3,13 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { extractVerificationContract, sisyphusObjectiveSufficient } from "./goal-contract.ts";
-import { buildDraftConfirmationText, buildProposalSummary, buildTweakConfirmationText, goalDraftingPrompt, type GoalDraftingFocus } from "./goal-draft.ts";
-import { renderConfirmationTasks } from "./goal-task-confirmation.ts";
+import { buildProposalSummary, goalDraftingPrompt, renderProposalTasks, type GoalDraftingFocus } from "./goal-draft.ts";
 import { deriveTasksFromObjective } from "./goal-task-derive.ts";
 import { goalDetails, renderGoalResult } from "./goal-format.ts";
 import { budgetReached } from "./goal-accounting.ts";
 import { buildGoalCreatedReport, formatGoalBudget } from "./goal-policy.ts";
 import { loadGoalSettings } from "./goal-settings.ts";
-import { DIALOG_UNAVAILABLE_HINT, proposalDialogFailureMessage, formatQuestionnaireAnswers, runGoalQuestionnaire, shouldAutoConfirmProposal, showProposalDialog, type GoalQuestionnaireQuestion, type ProposalDecision } from "./goal-questionnaire.ts";
+import { DIALOG_UNAVAILABLE_HINT, formatQuestionnaireAnswers, runGoalQuestionnaire, type GoalQuestionnaireQuestion } from "./goal-questionnaire.ts";
 import { currentTaskIdIsPending, nowIso, validateTokenBudgetInput, type GoalRecord, type GoalTaskList } from "./goal-record.ts";
 import type { GoalCore } from "./goal-state.ts";
 import { convertFlatTasks, countTasks, mergeTasksWithExisting, type FlatTaskInput } from "./goal-task-tools.ts";
@@ -155,7 +154,7 @@ export async function startGoalDrafting(core: GoalCore, ctx: ExtensionContext, m
 		clearGoalDrafting(core, ctx);
 	}
 	const startedAt = nowIso();
-	// §tweak-persist: a tweak confirmation defaults to the target goal's
+	// §tweak-persist: a tweak proposal defaults to the target goal's
 	// persisted per-goal auditor setting (skipAuditor); the global `auditor
 	// disabled` setting is only the fallback when the goal has no per-goal
 	// value. Confirming a tweak must never silently re-enable or disable the
@@ -168,7 +167,7 @@ export async function startGoalDrafting(core: GoalCore, ctx: ExtensionContext, m
 	core.clearContinuationState();
 	core.clearActiveAccounting();
 	core.installDraftingToolProfile();
-	ctx.ui.notify(label + " started" + (trimmed ? ": " + trimmed.slice(0, 60) : "") + ". The agent will clarify, propose a goal and tasks where useful, then ask you to confirm.", "info");
+	ctx.ui.notify(label + " started" + (trimmed ? ": " + trimmed.slice(0, 60) : "") + ". The agent will clarify, then create the goal with tasks where useful.", "info");
 	const prompt = mode === "tweak" ? [
 		"[GOAL TWEAK DRAFT]",
 		"The user wants to revise the focused persistent goal. Discuss requirements as needed; do not edit files or start substantive work.",
@@ -194,38 +193,6 @@ function proposedTaskList(core: GoalCore, ctx: ExtensionContext, tasks: FlatTask
 	return { ok: true, value: { tasks: converted.tasks, blockCompletion: blockCompletion === true, proposedAt: nowIso() } };
 }
 
-export function proposalText(draft: ActiveGoalDraft, objective: string, autoContinue: boolean, taskList: GoalTaskList | undefined, current?: GoalRecord, tokenBudget?: number | null): string {
-	const base = draft.mode === "tweak" && current
-		? buildTweakConfirmationText({ currentObjective: current.objective, newObjective: objective, changeSummary: draft.originalTopic || "Goal revised through guided drafting.", sisyphus: current.sisyphus, tasks: taskList?.tasks })
-		: buildDraftConfirmationText({ focus: draft.mode === "sisyphus" ? "sisyphus" : "goal", originalTopic: draft.originalTopic, objective, autoContinue });
-	// The task list is always shown exactly once in a proposal: explicitly
-	// proposed tasks, or (new drafts) tasks derived from the RAW objective, or
-	// (tweaks) the current goal's list when it is retained unchanged. Deriving
-	// from the boxed base text would never match: formatPrefixedLines prefixes
-	// every objective line with "│   " so checklist/ordered markers are hidden.
-	let tasksText = "";
-	if (draft.mode === "tweak") {
-		// buildTweakConfirmationText already renders explicit tasks exactly once
-		// inside its ┌─ TASKS ─┐ box; never append a second render. When no
-		// explicit list is proposed the current list is retained on apply
-		// (taskResult.value ?? goal.taskList), so preview it for confirmation.
-		if (!taskList && current?.taskList && current.taskList.tasks.length > 0) {
-			tasksText = "\n\nCurrent task list (retained unchanged):\n" + renderConfirmationTasks(current.taskList.tasks, 0).join("\n");
-		}
-	} else if (taskList && taskList.tasks.length > 0) {
-		tasksText = "\n\nTasks proposed for confirmation:\n" + renderConfirmationTasks(taskList.tasks, 0).join("\n");
-	} else {
-		// §single-task-set: the derived preview must derive from the SAME
-		// objective text the apply path persists (extracted — the Verification
-		// contract line removed), so shown == persisted.
-		const derived = deriveTasksFromObjective(extractVerificationContract(objective).objective);
-		if (derived && derived.length > 0) {
-			tasksText = "\n\nTasks derived from the objective (confirm or ask the agent to adjust):\n" + renderConfirmationTasks(derived, 0).join("\n");
-		}
-	}
-	return `${draft.mode === "tweak" ? `Current ${formatGoalBudget(current?.tokenBudget)}\nProposed ${formatGoalBudget(tokenBudget === undefined ? current?.tokenBudget : tokenBudget ?? undefined)}` : formatGoalBudget(tokenBudget ?? undefined)}\n\n${base}${tasksText}`;
-}
-
 function flatTaskSchema() {
 	return Type.Array(Type.Object({
 		id: Type.String({ description: "Short stable slug, for example task-1." }),
@@ -233,7 +200,7 @@ function flatTaskSchema() {
 		parent_id: Type.Optional(Type.String({ description: "Optional parent task id in this proposal." })),
 		verification_contract: Type.Optional(Type.String({ description: "Evidence required for this task." })),
 		lightweight_subtasks: Type.Optional(Type.Boolean({ description: "True only for a task with lightweight children." })),
-	}), { description: "Flat parent-linked task tree to confirm with the goal." });
+	}), { description: "Flat parent-linked task tree created with the goal." });
 }
 
 export function registerDraftingTools(core: GoalCore): void {
@@ -306,13 +273,13 @@ export function registerDraftingTools(core: GoalCore): void {
 	pi.registerTool(defineTool({
 		name: PROPOSE_DRAFT_TOOL_NAME,
 		label: "Propose Goal Draft",
-		description: "Present the drafted objective and agent-selected task plan for explicit user confirmation.",
-		promptSnippet: "Confirm the proposed goal and any useful task tree in one dialog.",
+		description: "Create or revise the goal from the drafted objective and agent-selected task plan. The proposal is applied immediately and its summary is written to the transcript.",
+		promptSnippet: "Create the proposed goal and any useful task tree.",
 		promptGuidelines: [
 			"Use only during a /goal, /sisyphus, or /goal-tweak guided draft.",
 			"Clarify ambiguity before proposing. Include tasks when the work naturally decomposes into trackable milestones; omit them for genuinely simple work.",
 			"Set token_budget only when the user explicitly asked for a token budget or a spend limit. Never invent, estimate, or infer one from the objective's size; omitting it creates a goal with no budget.",
-			"Confirmation creates or revises the goal atomically. Continue Chatting leaves drafting active for refinement.",
+			"The proposal creates or revises the goal atomically with no confirmation dialog, so call it only once the user has agreed to the contract in conversation.",
 		],
 		parameters: Type.Object({
 			objective: Type.String({ description: "Complete proposed objective; preserve it exactly for budget-only tweaks." }),
@@ -345,58 +312,26 @@ export function registerDraftingTools(core: GoalCore): void {
 			if (draft.mode === "tweak" && (!target || target.id !== draft.targetGoalId)) return { content: [{ type: "text", text: "The goal changed while drafting; review it and start /goal-tweak again." }], details: goalDetails(core.state.goal) };
 			if (target?.status === "complete") return {content: [{type: "text", text: "Completed goals cannot be tweaked."}], details: goalDetails(target)};
 			const proposalToken = target ? core.focusedOperationToken(target.id) : undefined;
-			const proposalRevision = target?.revision ?? 0;
 			const proposedBudget = params.token_budget === undefined ? target?.tokenBudget : params.token_budget ?? undefined;
 			const budgetSummary = target ? `Current ${formatGoalBudget(target.tokenBudget)}\nProposed ${formatGoalBudget(proposedBudget)}` : formatGoalBudget(proposedBudget);
 			if (draft.mode === "sisyphus" && !sisyphusObjectiveSufficient(objective)) return { content: [{ type: "text", text: "A Sisyphus goal needs ordered steps with explicit per-step done criteria. Refine the objective with numbered steps (1) ..., 2) ...) or Step N: blocks before proposing again." }], details: goalDetails(core.state.goal) };
-			let confirmation: { decision: ProposalDecision; auditorEnabled: boolean; unavailable: boolean };
-			if (shouldAutoConfirmProposal({ hasUI: ctx.hasUI, autoConfirmEnv: process.env.PI_GOAL_AUTO_CONFIRM })) {
-				confirmation = { decision: "confirm" as const, auditorEnabled: draft.auditorEnabled, unavailable: false };
-			} else {
-				core.enterGoalModal();
-				try {
-					confirmation = await showProposalDialog(ctx, proposalText(draft, objective, params.auto_continue !== false, taskResult.value, target ?? undefined, params.token_budget), draft.mode === "sisyphus" ? "sisyphus" : "goal", draft.auditorEnabled);
-				} catch (error) {
-					return { content: [{ type: "text", text: `${proposalDialogFailureMessage(error)} Do not retry the dialog until the host issue is resolved.` }], details: goalDetails(core.state.goal) };
-				} finally {
-					core.exitGoalModal();
-				}
-			}
 			const settings = loadGoalSettings(ctx.cwd);
 			const extracted = settings.disableContracts ? { objective, verificationContract: undefined } : extractVerificationContract(objective);
-			// §14: the durable proposal summary is part of the transcript for
-			// EVERY outcome (confirm / continue refining / cancel), so the user
-			// can review the proposal after the dialog closes.
+			// §14: the durable proposal summary is part of the transcript so the
+			// user can review what was applied.
 			const summary = budgetSummary + "\n\n" + buildProposalSummary({
 				objective: extracted.objective,
 				taskList: taskResult.value,
 				verificationContract: extracted.verificationContract,
 				autoContinue: params.auto_continue !== false,
-				auditorEnabled: confirmation.auditorEnabled,
+				auditorEnabled: draft.auditorEnabled,
 			});
-			if (confirmation.decision === "cancel") {
-				clearGoalDrafting(core, ctx);
-				return { content: [{ type: "text", text: `${summary}\n\nDraft cancelled; no goal was created. Run /goal or /sisyphus to start a new draft.` }], details: goalDetails(core.state.goal) };
-			}
-			if (confirmation.unavailable) {
-				return { content: [{ type: "text", text: `${summary}\n\n${DIALOG_UNAVAILABLE_HINT} The goal was NOT created and drafting remains active; do not retry the dialog until the host supports it or the user explicitly restarts with PI_GOAL_AUTO_CONFIRM=1.` }], details: goalDetails(core.state.goal) };
-			}
-			if (confirmation.decision !== "confirm") {
-				// Continue refining: preserve the user's auditor choice for the
-				// next proposal (memory and the durable session entry).
-				if (confirmation.auditorEnabled !== draft.auditorEnabled) {
-					const next = { ...draft, auditorEnabled: confirmation.auditorEnabled };
-					activeDrafts.set(core, next);
-					draftSessionEntry(core, { version: 1, mode: next.mode, seed: next.originalTopic, targetGoalId: next.targetGoalId, startedAt: next.startedAt, auditorEnabled: next.auditorEnabled });
-				}
-				return { content: [{ type: "text", text: `${summary}\n\nGoal draft refinement requested. The goal was not changed; ask what the user wants revised before proposing again.` }], details: goalDetails(core.state.goal) };
-			}
-			const skipAuditor = confirmation.auditorEnabled === false;
+			const skipAuditor = !draft.auditorEnabled;
 			// §14: capture the questionnaire answers BEFORE clearing draft state so
 			// the confirmed-goal report can include them reliably (E5).
 			const qaEcho = draft.questionnaireEcho;
 			if (draft.mode !== "tweak") {
-				// F2: if the confirmation carried no task plan but the objective has
+				// F2: if the proposal carried no task plan but the objective has
 				// structure, bootstrap the derived tree so the goal starts trackable.
 				const effectiveTaskList: GoalTaskList | undefined = taskResult.value ?? (() => {
 					const derived = deriveTasksFromObjective(extracted.objective);
@@ -419,9 +354,6 @@ export function registerDraftingTools(core: GoalCore): void {
 			}
 			if (!target) return { content: [{ type: "text", text: "The goal changed while drafting; review it and start /goal-tweak again." }], details: goalDetails(core.state.goal) };
 			const token = proposalToken!;
-			const finalFlushError = core.goalService.flushForAudit(ctx);
-			core.reconcileFocusedGoalFromDisk(ctx);
-			if (finalFlushError || core.goalService.isTurnBuffered() || !core.isFocusedOperationCurrent(token) || core.state.goal?.revision !== proposalRevision || core.state.goal?.status === "complete") return {content: [{type: "text", text: "Goal tweak was not applied: the goal changed during confirmation. Review and propose again."}], details: goalDetails(core.state.goal)};
 			const now = nowIso();
 			// §7.5 merge: a goal tweak must never change the status of steps that
 			// persist across the tweak. The proposed list merges into the goal's
@@ -496,37 +428,33 @@ export function registerDraftingTools(core: GoalCore): void {
 				core.queueContinuation(ctx, true);
 			}
 			clearGoalDrafting(core, ctx);
-			return { content: [{ type: "text", text: `${summary}\n\nGoal tweak confirmed and applied.\n${formatGoalBudget(result.goal.tokenBudget)}${schedulingNote}${result.goal.status === "budget_limited" ? "\nConsumed tokens already meet this budget; the goal remains budget-limited." : result.goal.status === "paused" ? "\nGoal remains paused. Use /goal-resume to continue when scheduling permits." : ""}` }], details: goalDetails(result.goal), terminate: true };
+			return { content: [{ type: "text", text: `${summary}\n\nGoal tweak applied.\n${formatGoalBudget(result.goal.tokenBudget)}${schedulingNote}${result.goal.status === "budget_limited" ? "\nConsumed tokens already meet this budget; the goal remains budget-limited." : result.goal.status === "paused" ? "\nGoal remains paused. Use /goal-resume to continue when scheduling permits." : ""}` }], details: goalDetails(result.goal), terminate: true };
 		},
 		renderCall(args, theme) {
-			// §proposal-presentation: the tool-call display lands in the terminal
-			// buffer the moment the tool call starts — BEFORE the confirmation
-			// dialog opens — so it is the scrollable "complete presentation" of
-			// the goal. It must show the full objective contract AND every task
-			// line; the dialog frame alone cannot (its churn-guard bound keeps
-			// it within the terminal height). The user can scroll up and read
-			// everything while the dialog is open ("the user can just scroll").
+			// §proposal-presentation: the tool-call display is the scrollable
+			// "complete presentation" of the goal the proposal applies, so it
+			// must show the full objective contract AND every task line.
 			const objective = String(args?.objective ?? "");
 			let text = theme.fg("toolTitle", "propose_goal_draft ") + theme.fg("muted", objective);
 			const flatTasks = Array.isArray(args?.tasks) ? (args.tasks as FlatTaskInput[]) : [];
 			// §single-task-set: a proposal shows exactly ONE task set — the set
 			// that will actually be persisted. Explicit tasks are that set; a
 			// tweak without explicit tasks retains the current list (mirror
-			// proposalText — never a derived-from-objective phantom); a new
+			// the apply path — never a derived-from-objective phantom); a new
 			// draft without explicit tasks shows the F2-derived preview derived
 			// from the SAME objective text the apply path persists (extracted).
 			let taskBlock: { header: string; lines: string[] } | null = null;
 			if (flatTasks.length > 0) {
-				taskBlock = { header: "Tasks proposed for confirmation:", lines: flatTasks.map((t) => `[ ] ${t.id}: ${t.title}`) };
+				taskBlock = { header: "Tasks created with the goal:", lines: flatTasks.map((t) => `[ ] ${t.id}: ${t.title}`) };
 			} else if (activeDraft(core)?.mode === "tweak") {
 				const retained = core.state.goal?.taskList?.tasks;
 				if (retained && retained.length > 0) {
-					taskBlock = { header: "Current task list (retained unchanged):", lines: renderConfirmationTasks(retained, 0) };
+					taskBlock = { header: "Current task list (retained unchanged):", lines: renderProposalTasks(retained, 0) };
 				}
 			} else {
 				const derived = deriveTasksFromObjective(extractVerificationContract(objective).objective) ?? [];
 				if (derived.length > 0) {
-					taskBlock = { header: "Tasks derived from the objective (confirm or ask the agent to adjust):", lines: renderConfirmationTasks(derived, 0) };
+					taskBlock = { header: "Tasks derived from the objective:", lines: renderProposalTasks(derived, 0) };
 				}
 			}
 			if (taskBlock) {
