@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { schedulerSummary, type GoalContinuation } from "./goal-scheduler-state.ts";
 import { goalDetailPage, type GoalDetailSection } from "./goal-detail.ts";
 import { taskIndex } from "./goal-task-index.ts";
@@ -475,6 +476,8 @@ async function runGoalAgentPauseFlow(ctx: ExtensionContext, reason: string | und
 			stopReason: "agent" as const,
 			pauseReason: trimmedReason,
 			pauseSuggestedAction: trimmedAction || undefined,
+			scheduler: g.scheduler ? { ...g.scheduler, generation: randomUUID(), phase: "idle" as const,
+				decision: undefined, dispatch: undefined, wait: undefined, monitorWait: undefined } : undefined,
 			updatedAt: nowIso(),
 		}),
 		ledger: (written) => [{
@@ -487,6 +490,7 @@ async function runGoalAgentPauseFlow(ctx: ExtensionContext, reason: string | und
 		}],
 	});
 	if (result.ok) {
+		core.scheduler.cancelTimer();
 		core.clearContinuationState();
 		core.clearActiveAccounting();
 		if (result.goal) core.runtime.markTurnStopped(result.goal.id);

@@ -23,6 +23,7 @@ const { registerDraftingTools, startGoalDrafting } = await jiti.import("../exten
 const { registerTaskTools } = await jiti.import("../extensions/goal-task-tools.ts");
 const { invalidateGoalSettingsCache } = await jiti.import("../extensions/goal-settings.ts");
 const { registerGoalCommands } = await jiti.import("../extensions/goal-commands.ts");
+const { registerCoreTools } = await jiti.import("../extensions/goal-core-tools.ts");
 
 const refuseDialog = () => { throw new Error("a confirmation dialog must not open"); };
 
@@ -95,4 +96,42 @@ test("/goal with an objective starts directly without a drafting dialogue", asyn
 	assert.equal(h.state.goal?.objective, "Ship the small change");
 	assert.equal(h.state.goal?.autoContinue, true);
 	assert.equal(h.state.goal?.sisyphus, false);
+});
+
+test("agent pause clears a running scheduler without resetting its usage", async (t) => {
+	const h = harness(t);
+	let timerCancelled = false;
+	h.state.goal = { id: "goal-1", status: "active", objective: "Wait for a decision", autoContinue: true,
+		scheduler: { version: 1, owner: "session-1", generation: "old-generation", used: 3,
+			phase: "running", repairUsed: false, decision: { kind: "ready" }, dispatch: { id: "old" },
+			wait: { id: "old" }, monitorWait: { active: true } } };
+	h.core.flushGoalTransaction = () => {};
+	h.core.accountProgress = () => {};
+	h.core.scheduler = { cancelTimer() { timerCancelled = true; } };
+	registerCoreTools(h.core, { runGoalCompletionFlow: async () => { throw new Error("unexpected completion"); } });
+	const result = await h.tools.get("update_goal").execute("pause-call", { status: "paused", reason: "Need a decision" }, undefined, undefined, h.ctx);
+	assert.equal(result.terminate, true);
+	assert.equal(h.state.goal.status, "paused");
+	assert.equal(h.state.goal.scheduler.phase, "idle");
+	assert.equal(h.state.goal.scheduler.used, 3);
+	assert.notEqual(h.state.goal.scheduler.generation, "old-generation");
+	for (const key of ["decision", "dispatch", "wait", "monitorWait"]) assert.equal(h.state.goal.scheduler[key], undefined);
+	assert.equal(timerCancelled, true);
+});
+
+test("a rejected agent pause does not cancel the scheduler", async (t) => {
+	const h = harness(t);
+	let timerCancelled = false;
+	h.state.goal = { id: "goal-1", status: "active", objective: "Continue working", autoContinue: true,
+		scheduler: { version: 1, owner: "session-1", generation: "same", used: 2, phase: "running", repairUsed: false } };
+	h.core.flushGoalTransaction = () => {};
+	h.core.accountProgress = () => {};
+	h.core.scheduler = { cancelTimer() { timerCancelled = true; } };
+	h.core.goalService.apply = () => ({ ok: false, message: "conflict" });
+	registerCoreTools(h.core, { runGoalCompletionFlow: async () => { throw new Error("unexpected completion"); } });
+	const result = await h.tools.get("update_goal").execute("pause-call", { status: "paused", reason: "Need a decision" }, undefined, undefined, h.ctx);
+	assert.equal(result.terminate, false);
+	assert.equal(h.state.goal.status, "active");
+	assert.equal(h.state.goal.scheduler.phase, "running");
+	assert.equal(timerCancelled, false);
 });
