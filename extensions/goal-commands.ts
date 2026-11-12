@@ -75,8 +75,8 @@ import {
 import type { GoalCore } from "./goal-state.ts";
 
 /**
- * The curated twelve-command palette. /goal and /sisyphus begin guided
- * drafting; -direct commands are the explicit bypass. Every frequent lifecycle action is independently
+ * /goal starts immediately and /goal-draft opts into guided drafting;
+ * -direct commands remain available to existing callers. Frequent lifecycle actions are independently
  * registered so it appears in slash-command tab completion. No aliases.
  */
 export function registerGoalCommands(core: GoalCore): void {
@@ -117,7 +117,7 @@ export function registerGoalCommands(core: GoalCore): void {
 	async function focusGoalCommand(ctx: ExtensionContext): Promise<void> {
 		const open = core.openGoals();
 		if (open.length === 0) {
-			ctx.ui.notify("No open goals. Use /goal to draft one, or /goal-direct <objective> to start immediately.", "warning");
+			ctx.ui.notify("No open goals. Use /goal <objective> to start one.", "warning");
 			return;
 		}
 		if (open.length === 1) {
@@ -688,14 +688,14 @@ export function registerGoalCommands(core: GoalCore): void {
 				const selected = await chooseOpenGoal(ctx, "Tweak which open goal?");
 				if (!selected) return;
 			} else {
-				ctx.ui.notify("No goal is set. Use /goal to draft one, or /goal-direct <objective> to create one immediately.", "warning");
+				ctx.ui.notify("No goal is set. Use /goal <objective> to start one.", "warning");
 				return;
 			}
 		}
 		const currentGoal = core.state.goal;
 		if (!currentGoal) return;
 		if (currentGoal.status === "complete") {
-			ctx.ui.notify("Goal is complete. Use /goal to draft a new one, or /goal-direct <objective> to create one immediately.", "warning");
+			ctx.ui.notify("Goal is complete. Use /goal <objective> to start a new one.", "warning");
 			return;
 		}
 		const trimmed = replacement.trim();
@@ -713,12 +713,17 @@ export function registerGoalCommands(core: GoalCore): void {
 		await startGoalDrafting(core, ctx, "tweak", trimmed, currentGoal);
 	}
 
-	// /goal and /sisyphus are the guided default. -direct commands are the explicit bypass.
+	// A supplied /goal objective starts immediately. Guided planning remains opt-in.
 	pi.registerCommand("goal", {
-		description: "Draft a regular goal with clarification and task planning, then create it.",
+		description: "Start a goal immediately: /goal <objective>. Without an objective, show its status.",
 		handler: async (rawArgs, ctx) => {
-			await startGoalDrafting(core, ctx, "goal", rawArgs);
+			if (rawArgs.trim()) handleDirectGoalSet(rawArgs, ctx, "goal");
+			else await showGoalStatus("", ctx);
 		},
+	});
+	pi.registerCommand("goal-draft", {
+		description: "Discuss and plan a goal before starting it.",
+		handler: async (rawArgs, ctx) => { await startGoalDrafting(core, ctx, "goal", rawArgs); },
 	});
 	pi.registerCommand("sisyphus", {
 		description: "Draft a Sisyphus goal with clarification and task planning, then create it.",

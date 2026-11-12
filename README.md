@@ -24,10 +24,9 @@ The extension saves goal objectives, tasks, and progress across sessions. You ca
 With an active auto-continue goal, the agent can include the literal
 `GOAL_WAIT` in its final assistant reply to suspend automatic continuation,
 but only while this session has an `exec_command` session still running in the
-background (the patched pi-codex-tools; check with `exec_list`). The first
-`GOAL_WAIT` only asks the agent to confirm nothing independent can advance;
-a second one in a row enters the wait. User text, tool output, and thinking
-blocks do not request waiting.
+background (the patched pi-codex-tools; check with `exec_list`). One final
+`GOAL_WAIT` enters the wait. User text, tool output, and thinking blocks do not
+request waiting.
 
 A user message or the session's `monitor-event` notification (sent every 10
 minutes with new output and once on exit, or on each burst with
@@ -41,6 +40,10 @@ message can always release the wait. This mode is separate from the existing
 strict-contract timed wait and relies on the `pi-monitor:query` /
 `pi-monitor:notification` events answered by the patched pi-codex-tools
 (pi-event-monitor is no longer used).
+
+To run the real background-process integration test, check out
+`pi-codex-tools-ssh` beside this repository or set `PI_CODEX_TOOLS_ROOT` to
+its path, then run `npm run test:monitor-wait`.
 
 ### Local patch: proposals apply without a confirmation dialog
 
@@ -62,17 +65,17 @@ pi install npm:pi-goal-x
 /goal Add CSV export to the reports page, with documentation and tests.
 ```
 
-The agent discusses the goal with you, asks focused questions where needed, and then creates the goal with its objective, task plan, and completion requirements. The proposal summary appears in the transcript, and the agent starts working and continues automatically while the goal is active.
+The goal is created and starts immediately. The agent continues automatically while the goal is active. Use `/goal` without an objective to show its status.
 
 You can specify completion requirements, such as passing the test suite or producing a report with every required section. The agent tracks tasks and subtasks, records evidence, and works toward those requirements. If it gets blocked and needs your input, you can resolve the issue and resume.
 
-If you already have a complete objective, use `/goal-direct <objective>` to create the goal and start immediately without drafting.
+For guided clarification before starting, use `/goal-draft <idea>`. The older `/goal-direct <objective>` remains an alias for scripts.
 
 ## Goal types
 
 | Type | Behaviour | Example uses |
 | --- | --- | --- |
-| **Regular** — `/goal` | An outcome to achieve, with the agent choosing and adapting the plan. | Features, debugging, research, and documentation. |
+| **Regular** — `/goal <objective>` | An outcome to achieve, with the agent choosing and adapting the plan. | Features, debugging, research, and documentation. |
 | **Sisyphus** — `/sisyphus` | An ordered plan that the agent follows one step at a time. | Migrations, staged refactors, and release procedures. |
 
 For an ordered goal, you can provide the steps or define them with the agent:
@@ -125,7 +128,8 @@ A project can have several open goals, with one focused goal per session. Switch
 
 | Command | What it does |
 | --- | --- |
-| `/goal [idea]` | Discuss, plan, and create a regular goal. |
+| `/goal [objective]` | Start a regular goal immediately, or show status without an objective. |
+| `/goal-draft [idea]` | Discuss and plan a regular goal before starting. |
 | `/sisyphus [idea]` | Discuss, plan, and create an ordered goal. |
 | `/goal-direct <objective>` | Create and start a regular goal immediately. |
 | `/sisyphus-direct <objective>` | Create and start an ordered goal immediately. |

@@ -1,7 +1,8 @@
 import { schedulerSummary, type GoalContinuation } from "./goal-scheduler-state.ts";
 import { goalDetailPage, type GoalDetailSection } from "./goal-detail.ts";
 import { taskIndex } from "./goal-task-index.ts";
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type AgentToolResult, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { formatDuration, formatTokenValue, statusLabel, truncateText } from "./goal-core.ts";

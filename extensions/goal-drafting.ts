@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { extractVerificationContract, sisyphusObjectiveSufficient } from "./goal-contract.ts";

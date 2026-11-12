@@ -22,6 +22,7 @@ const jiti = createJiti(import.meta.url, {
 const { registerDraftingTools, startGoalDrafting } = await jiti.import("../extensions/goal-drafting.ts");
 const { registerTaskTools } = await jiti.import("../extensions/goal-task-tools.ts");
 const { invalidateGoalSettingsCache } = await jiti.import("../extensions/goal-settings.ts");
+const { registerGoalCommands } = await jiti.import("../extensions/goal-commands.ts");
 
 const refuseDialog = () => { throw new Error("a confirmation dialog must not open"); };
 
@@ -83,4 +84,15 @@ test("set_goal_tasks replaces the task tree immediately while the UI could show 
 
 	assert.ok(h.state.goal.taskList.tasks.some((task: any) => task.id === "task-1"));
 	assert.equal(result.terminate, true);
+});
+
+test("/goal with an objective starts directly without a drafting dialogue", async (t) => {
+	const h = harness(t);
+	const commands = new Map<string, any>();
+	h.core.pi.registerCommand = (name: string, command: any) => commands.set(name, command);
+	registerGoalCommands(h.core);
+	await commands.get("goal").handler("  Ship the small change  ", h.ctx);
+	assert.equal(h.state.goal?.objective, "Ship the small change");
+	assert.equal(h.state.goal?.autoContinue, true);
+	assert.equal(h.state.goal?.sisyphus, false);
 });
