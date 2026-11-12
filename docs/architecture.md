@@ -83,9 +83,9 @@ direct write or ledger calls.
 
 ```text
 /user command or explicit create_goal request
-  ├─ /goal [seed] or /sisyphus [seed]
-  │    └─ guided draft: clarify/questionnaire → objective + optional task proposal → explicit confirmation
-  ├─ /goal-direct <objective> or /sisyphus-direct <objective>
+  ├─ /goal-draft [seed] or /sisyphus [seed]
+  │    └─ guided draft: clarify/questionnaire → objective + optional task proposal
+  ├─ /goal <objective>, /goal-direct <objective> or /sisyphus-direct <objective>
   │    └─ direct creation: objective (1–4000 chars) → active goal file → focused → autoContinue
   ├─ focused active goal
   │    ├─ autoContinue queues checkpoint turns
@@ -168,11 +168,11 @@ prompt/criteria level:
 
 ## Creation and tweaking
 
-`/goal [seed]` and `/sisyphus [seed]` begin guided drafting. The temporary
+`/goal-draft [seed]` and `/sisyphus [seed]` begin guided drafting. The temporary
 draft profile exposes only question/questionnaire/proposal tools. The agent
 clarifies intent, proposes the full objective and an optional task tree, and
-the user explicitly confirms or continues refining. `/goal-direct` and
-`/sisyphus-direct` bypass this only when the objective is already final.
+the proposal is applied immediately once the user has agreed in conversation.
+`/goal <objective>`, `/goal-direct` and `/sisyphus-direct` start immediately.
 
 `/goal-tweak <change>` starts the same guided-confirmation process for the
 focused goal. It preserves the task list when no replacement is proposed and
@@ -181,7 +181,8 @@ user confirms.
 
 ## Command focus behavior
 
-- `/goal [seed]` starts a regular guided draft; bare `/goal` asks what to accomplish.
+- `/goal <objective>` starts immediately; bare `/goal` shows status.
+- `/goal-draft [seed]` starts a regular guided draft.
 - `/sisyphus [seed]` starts a Sisyphus guided draft.
 - `/goal-direct <objective>` and `/sisyphus-direct <objective>` create directly without drafting.
 - `/goal-list` prints all open goals with id, status, mode, usage, objective title, path, and a focus marker.

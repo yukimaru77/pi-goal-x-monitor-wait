@@ -59,7 +59,7 @@ export function validateGoalDraftProposal(input: DraftProposalInput): DraftPropo
 	if (input.intent === null) {
 		return {
 			ok: false,
-			message: "propose_goal_draft REJECTED: no /goal, /sisyphus, or /goal-tweak guided draft is in progress.",
+			message: "propose_goal_draft REJECTED: no /goal-draft, /sisyphus, or /goal-tweak guided draft is in progress.",
 		};
 	}
 

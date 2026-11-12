@@ -276,7 +276,7 @@ export function registerDraftingTools(core: GoalCore): void {
 		description: "Create or revise the goal from the drafted objective and agent-selected task plan. The proposal is applied immediately and its summary is written to the transcript.",
 		promptSnippet: "Create the proposed goal and any useful task tree.",
 		promptGuidelines: [
-			"Use only during a /goal, /sisyphus, or /goal-tweak guided draft.",
+			"Use only during a /goal-draft, /sisyphus, or /goal-tweak guided draft.",
 			"Clarify ambiguity before proposing. Include tasks when the work naturally decomposes into trackable milestones; omit them for genuinely simple work.",
 			"Set token_budget only when the user explicitly asked for a token budget or a spend limit. Never invent, estimate, or infer one from the objective's size; omitting it creates a goal with no budget.",
 			"The proposal creates or revises the goal atomically with no confirmation dialog, so call it only once the user has agreed to the contract in conversation.",
