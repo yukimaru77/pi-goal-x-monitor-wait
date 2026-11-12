@@ -15,7 +15,10 @@ try {
   writeFileSync(settings, JSON.stringify({maxAutonomousRuns: 0}));
   const extension = resolve(dirname(fileURLToPath(import.meta.url)), '../extensions/goal.ts');
   const objective = 'Isolated direct goal smoke test';
-  const request = JSON.stringify({id: 'goal-smoke', type: 'prompt', message: `/goal ${objective}`}) + '\n';
+  const request = [
+    {id: 'goal-smoke', type: 'prompt', message: `/goal ${objective}`},
+    {id: 'goal-status', type: 'prompt', message: '/goal'},
+  ].map(value => JSON.stringify(value)).join('\n') + '\n';
   const env = {...process.env, PI_CODING_AGENT_DIR: profile, PI_GOAL_SETTINGS_FILE: settings,
     PI_GOAL_GLOBAL_SETTINGS_FILE: join(root, 'absent-global.json')};
   const result = spawnSync('pi', ['--mode', 'rpc', '--no-session', '--no-extensions', '--no-skills',
@@ -23,6 +26,7 @@ try {
   assert.equal(result.status, 0, `Pi failed: ${result.error?.message || result.stderr}`);
   const records = result.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line));
   assert.ok(records.some(record => record.id === 'goal-smoke' && record.success === true), 'RPC command was not accepted');
+  assert.ok(records.some(record => record.id === 'goal-status' && record.success === true), 'bare /goal did not show status');
   const directory = join(root, '.pi', 'goals');
   const active = readdirSync(directory).filter(name => name.startsWith('active_goal_') && name.endsWith('.md'));
   assert.equal(active.length, 1, 'one goal should be persisted');
