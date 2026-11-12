@@ -50,6 +50,7 @@
   },
   "scripts": {
     "test:monitor-wait": "node --experimental-strip-types --test tests/monitor-wait.test.ts && node scripts/monitor-pair-test.mjs",
+    "test:rpc-smoke": "node scripts/smoke-rpc.mjs",
     "test:auto-confirm": "node --experimental-strip-types --test tests/auto-confirm.test.ts",
     "check": "tsc --noEmit",
     "test": "node scripts/run-unit-tests.mjs",
